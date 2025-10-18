@@ -9,7 +9,7 @@ A lightweight TCP proxy firewall for BBS telnet connections, built with Node.js.
 - **Logging**: Detailed connection and traffic logging
 - **Configurable**: Easy configuration via environment variables
 - **Graceful Shutdown**: Handles SIGTERM/SIGINT for clean shutdowns
-- **No External Dependencies**: Uses only Node.js built-in modules
+- **Few External Dependencies**: Uses only Node.js built-in modules, dotenv, and maxmind
 
 ## Installation
 
