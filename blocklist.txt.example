@@ -1,0 +1,22 @@
+# IP Blocklist for bbsfw
+#
+# One IP address per line
+# Lines starting with # are comments
+# Empty lines are ignored
+#
+# Examples:
+# 192.168.1.100
+# 10.0.0.50
+# 2001:0db8:85a3::8a2e:0370:7334
+#
+# To use this file:
+# 1. Copy it to blocklist.txt
+# 2. Add your blocked IPs
+# 3. Set BLOCKLIST_PATH=blocklist.txt in your .env file
+#    or run: BLOCKLIST_PATH=blocklist.txt npm start
+
+# Example blocked IPs (remove or replace these)
+# 203.0.113.0
+# 198.51.100.0
+
+
