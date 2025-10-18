@@ -2,13 +2,16 @@
  * Configuration management for bbsfw
  */
 
+// Load environment variables from .env file
+require('dotenv').config();
+
 const config = {
   // Port to listen on for incoming connections
-  listenPort: parseInt(process.env.LISTEN_PORT || '2323', 10),
+  listenPort: parseInt(process.env.LISTEN_PORT || '23', 10),
   
   // Backend server to forward connections to
   backendHost: process.env.BACKEND_HOST || '127.0.0.1',
-  backendPort: parseInt(process.env.BACKEND_PORT || '23', 10),
+  backendPort: parseInt(process.env.BACKEND_PORT || '2323', 10),
   
   // Server settings
   maxConnections: parseInt(process.env.MAX_CONNECTIONS || '100', 10),

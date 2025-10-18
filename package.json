@@ -9,6 +9,7 @@
     "setup-geoip": "node download-geoip.js"
   },
   "dependencies": {
+    "dotenv": "^17.2.3",
     "maxmind": "^4.3.0"
   },
   "keywords": [
@@ -24,4 +25,3 @@
     "node": ">=14.0.0"
   }
 }
-
