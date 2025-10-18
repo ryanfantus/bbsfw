@@ -29,8 +29,10 @@ class ProxyConnection {
     const clientIp = this.clientSocket.remoteAddress;
     logger.info(`[${this.connectionId}] New connection from ${this.clientAddress}`);
     
-    // Check IP filter (blocklist and rate limiting)
+    // Check IP filter (whitelist, blocklist, and rate limiting)
     const ipFilter = getIPFilter();
+    let isWhitelisted = false;
+    
     if (ipFilter) {
       const filterResult = ipFilter.shouldAllowConnection(clientIp);
       if (!filterResult.allowed) {
@@ -38,10 +40,11 @@ class ProxyConnection {
         this.clientSocket.end();
         return;
       }
+      isWhitelisted = filterResult.whitelisted || false;
     }
     
-    // Check country blocking
-    if (this.shouldBlockConnection(clientIp)) {
+    // Check country blocking (skip for whitelisted IPs)
+    if (!isWhitelisted && this.shouldBlockConnection(clientIp)) {
       logger.warn(`[${this.connectionId}] Connection blocked by country filter`);
       this.clientSocket.end();
       return;

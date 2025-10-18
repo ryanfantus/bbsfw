@@ -29,6 +29,9 @@ const config = {
   // IP blocklist file path
   blocklistPath: process.env.BLOCKLIST_PATH || '',
   
+  // IP whitelist file path (IPs exempt from all firewall rules)
+  whitelistPath: process.env.WHITELIST_PATH || '',
+  
   // Rate limiting / flood protection
   rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false', // Enabled by default
   maxConnectionsPerWindow: parseInt(process.env.MAX_CONNECTIONS_PER_WINDOW || '10', 10),

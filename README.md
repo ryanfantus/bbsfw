@@ -48,6 +48,7 @@ Configure the firewall by setting environment variables or editing `.env`:
 | `CONNECTION_TIMEOUT` | Connection timeout in milliseconds (0 to disable) | `300000` (5 min) |
 | `BLOCKED_COUNTRIES` | Comma-separated ISO country codes to block (e.g., CN,RU,KP) | _(empty)_ |
 | `BLOCK_UNKNOWN_COUNTRIES` | Block connections when country cannot be determined | `false` |
+| `WHITELIST_PATH` | Path to IP whitelist file (exempt from all firewall rules) | _(empty)_ |
 | `BLOCKLIST_PATH` | Path to IP blocklist file | _(empty)_ |
 | `RATE_LIMIT_ENABLED` | Enable connection flood protection | `true` |
 | `MAX_CONNECTIONS_PER_WINDOW` | Max connections per IP within time window | `10` |
@@ -177,9 +178,47 @@ RATE_LIMIT_BLOCK_DURATION_MS=300000
 RATE_LIMIT_ENABLED=false npm start
 ```
 
+### IP Whitelist
+
+Whitelist specific IP addresses or ranges to **bypass all firewall rules** (country blocking, rate limiting, and blocklist):
+
+1. Create a whitelist file:
+
+```bash
+cp whitelist.txt.example whitelist.txt
+```
+
+2. Add IPs or CIDR ranges to whitelist (one per line):
+
+```
+# whitelist.txt
+192.168.1.100          # Single trusted IP
+10.0.0.0/8             # Entire private network
+172.16.0.0/12          # Another private range
+```
+
+3. Enable the whitelist:
+
+```bash
+WHITELIST_PATH=whitelist.txt npm start
+```
+
+**Whitelist features:**
+- IPs in the whitelist bypass ALL firewall rules
+- Supports single IPs (e.g., `192.168.1.100`)
+- Supports CIDR ranges (e.g., `192.168.1.0/24`, `10.0.0.0/8`)
+- Comments supported (lines starting with #)
+- IPv4 and IPv6-mapped IPv4 addresses supported
+- Changes require restart to take effect
+
+**Use cases:**
+- Allow connections from trusted networks or IPs
+- Exempt monitoring systems from rate limiting
+- Allow administrative access regardless of country
+
 ### IP Blocklist
 
-Block specific IP addresses from a file:
+Block specific IP addresses or ranges from a file:
 
 1. Create a blocklist file:
 
@@ -187,12 +226,12 @@ Block specific IP addresses from a file:
 cp blocklist.txt.example blocklist.txt
 ```
 
-2. Add IPs to block (one per line):
+2. Add IPs or CIDR ranges to block (one per line):
 
 ```
 # blocklist.txt
-192.168.1.100
-10.0.0.50
+192.168.1.100          # Single IP
+10.0.0.0/24            # CIDR range
 203.0.113.0
 # IPv6 also supported
 2001:0db8:85a3::8a2e:0370:7334
@@ -205,7 +244,8 @@ BLOCKLIST_PATH=blocklist.txt npm start
 ```
 
 **Blocklist features:**
-- One IP per line
+- One IP or CIDR range per line
+- Supports CIDR notation (e.g., `192.168.1.0/24`)
 - Comments supported (lines starting with #)
 - IPv4 and IPv6 addresses
 - Changes require restart to take effect
@@ -217,18 +257,20 @@ Use all protection methods together:
 
 ```bash
 # In .env file
-BLOCKED_COUNTRIES=CN,RU,KP
+WHITELIST_PATH=whitelist.txt
 BLOCKLIST_PATH=blocklist.txt
+BLOCKED_COUNTRIES=CN,RU,KP
 RATE_LIMIT_ENABLED=true
 MAX_CONNECTIONS_PER_WINDOW=10
 RATE_LIMIT_WINDOW_MS=60000
 ```
 
 **Processing order:**
-1. IP blocklist check (permanent block)
-2. Rate limit check (temporary block)
-3. Country check (if GeoIP enabled)
-4. If all pass, connection forwarded to BBS
+1. **Whitelist check** - If matched, allow immediately (skip all other checks)
+2. IP blocklist check (permanent block)
+3. Rate limit check (temporary block)
+4. Country check (if GeoIP enabled)
+5. If all pass, connection forwarded to BBS
 
 ## Architecture
 
@@ -246,6 +288,7 @@ The firewall consists of several modules:
 
 1. The firewall listens on the configured `LISTEN_PORT`
 2. When a client connects, the IP is checked in this order:
+   - **Whitelist** (if matched, skip all other checks)
    - IP blocklist (permanent block)
    - Rate limiting (temporary block for floods)
    - GeoIP country check (if enabled)
@@ -258,8 +301,9 @@ The firewall consists of several modules:
 ## Features
 
 ✅ **TCP Proxy**: Forwards telnet connections to backend BBS server  
+✅ **IP Whitelist**: Always allow specific IPs/ranges (bypass all firewall rules)  
 ✅ **Country Blocking**: Block connections from specific countries using local GeoIP database  
-✅ **IP Blocklist**: Block specific IP addresses from a file  
+✅ **IP Blocklist**: Block specific IP addresses/ranges from a file (supports CIDR)  
 ✅ **Rate Limiting**: Automatic flood protection with temporary blocking  
 ✅ **Connection Management**: Track and limit simultaneous connections  
 ✅ **Logging**: Detailed logging with configurable levels and filtering decisions  
@@ -271,11 +315,10 @@ The firewall consists of several modules:
 Planned features for future releases:
 
 - Connection statistics and monitoring dashboard
-- HTTP API for management and dynamic blocklist updates
+- HTTP API for management and dynamic blocklist/whitelist updates
 - Configuration reload without restart (live reload)
-- CIDR range support in blocklist
-- Whitelist support (always allow specific IPs)
 - IPv6 support improvements
+- Custom ban messages/responses
 
 ## Development
 
@@ -292,6 +335,7 @@ bbsfw/
 ├── download-geoip.js      # Database download helper
 ├── package.json           # Project metadata
 ├── .env.example           # Example configuration
+├── whitelist.txt.example  # Example IP whitelist
 ├── blocklist.txt.example  # Example IP blocklist
 ├── data/                  # GeoIP database directory
 └── README.md              # Documentation
