@@ -11,10 +11,12 @@ const logger = require('./logger');
 const { handleConnection } = require('./proxy');
 const { initializeGeoIP } = require('./geoip');
 const { initializeIPFilter } = require('./ipfilter');
+const { startSSHServer } = require('./ssh');
 
 class BBSFirewall {
   constructor() {
     this.server = null;
+    this.sshServer = null;
     this.activeConnections = 0;
   }
 
@@ -34,7 +36,7 @@ class BBSFirewall {
     // Initialize IP filter
     initializeIPFilter(config);
     
-    logger.info(`Configuration:`, {
+    const configLog = {
       listenPort: config.listenPort,
       backendHost: config.backendHost,
       backendPort: config.backendPort,
@@ -46,7 +48,15 @@ class BBSFirewall {
       maxConnectionsPerWindow: config.maxConnectionsPerWindow,
       rateLimitWindowMs: `${config.rateLimitWindowMs}ms`,
       blocklistPath: config.blocklistPath || 'none',
-    });
+      sshEnabled: config.sshEnabled,
+    };
+    
+    if (config.sshEnabled) {
+      configLog.sshListenPort = config.sshListenPort;
+      configLog.sshCiphers = config.sshCiphers.join(', ');
+    }
+    
+    logger.info(`Configuration:`, configLog);
 
     this.server = net.createServer((clientSocket) => {
       this.handleNewConnection(clientSocket);
@@ -65,6 +75,9 @@ class BBSFirewall {
       logger.info(`Forwarding connections to ${config.backendHost}:${config.backendPort}`);
     });
 
+    // Start SSH server if enabled
+    this.sshServer = startSSHServer(config, this);
+    
     this.setupGracefulShutdown();
   }
 
@@ -102,20 +115,40 @@ class BBSFirewall {
     const shutdown = () => {
       logger.info('Shutting down gracefully...');
       
+      let serversToClose = 0;
+      let serversClosed = 0;
+      
       if (this.server) {
+        serversToClose++;
         this.server.close(() => {
-          logger.info('Server closed');
-          process.exit(0);
+          logger.info('Telnet server closed');
+          serversClosed++;
+          if (serversClosed === serversToClose) {
+            process.exit(0);
+          }
         });
-
-        // Force shutdown after 10 seconds
-        setTimeout(() => {
-          logger.warn('Forcing shutdown');
-          process.exit(1);
-        }, 10000);
-      } else {
+      }
+      
+      if (this.sshServer) {
+        serversToClose++;
+        this.sshServer.close(() => {
+          logger.info('SSH server closed');
+          serversClosed++;
+          if (serversClosed === serversToClose) {
+            process.exit(0);
+          }
+        });
+      }
+      
+      if (serversToClose === 0) {
         process.exit(0);
       }
+
+      // Force shutdown after 10 seconds
+      setTimeout(() => {
+        logger.warn('Forcing shutdown');
+        process.exit(1);
+      }, 10000);
     };
 
     process.on('SIGTERM', shutdown);

@@ -5,11 +5,14 @@ A lightweight TCP proxy firewall for BBS telnet connections, built with Node.js.
 ## Features
 
 - **TCP Proxy**: Forwards telnet connections to an internal BBS server
+- **SSH Server**: Built-in SSH server that proxies to telnet backend (accepts any credentials)
+  - Note: Use telnet for binary file transfers (Zmodem, etc.); SSH is best for browsing
 - **Connection Management**: Tracks active connections and enforces limits
 - **Logging**: Detailed connection and traffic logging
 - **Configurable**: Easy configuration via environment variables
 - **Graceful Shutdown**: Handles SIGTERM/SIGINT for clean shutdowns
-- **Few External Dependencies**: Uses only Node.js built-in modules, dotenv, and maxmind
+- **Legacy Cipher Support**: Configurable SSH ciphers for old BBS clients
+- **Few External Dependencies**: Uses only Node.js built-in modules and minimal packages
 
 ## Installation
 
@@ -41,11 +44,15 @@ Configure the firewall by setting environment variables or editing `.env`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `LISTEN_PORT` | Port to listen on for incoming connections | `2323` |
+| `LISTEN_PORT` | Port to listen on for incoming telnet connections | `2323` |
 | `BACKEND_HOST` | Backend BBS server hostname/IP (use 127.0.0.1 for IPv4) | `127.0.0.1` |
 | `BACKEND_PORT` | Backend BBS server port | `23` |
 | `MAX_CONNECTIONS` | Maximum simultaneous connections | `100` |
 | `CONNECTION_TIMEOUT` | Connection timeout in milliseconds (0 to disable) | `300000` (5 min) |
+| `SSH_ENABLED` | Enable SSH server | `false` |
+| `SSH_LISTEN_PORT` | Port to listen on for incoming SSH connections | `2222` |
+| `SSH_HOST_KEY` | Path to SSH host private key file | `./ssh_host_key` |
+| `SSH_CIPHERS` | Comma-separated list of allowed SSH ciphers | _(see below)_ |
 | `BLOCKED_COUNTRIES` | Comma-separated ISO country codes to block (e.g., CN,RU,KP) | _(empty)_ |
 | `BLOCK_UNKNOWN_COUNTRIES` | Block connections when country cannot be determined | `false` |
 | `WHITELIST_PATH` | Path to IP whitelist file (exempt from all firewall rules) | _(empty)_ |
@@ -79,6 +86,125 @@ telnet localhost 2323
 ```
 
 The connection will be forwarded to your configured backend server.
+
+## SSH Server
+
+bbsfw includes an optional SSH server that allows users to connect via SSH instead of raw telnet. The SSH server accepts **any username and password combination** and immediately proxies the connection to your backend BBS via telnet.
+
+**⚠️ Important:** Binary file transfers (Zmodem, Ymodem, etc.) do not work reliably over SSH due to PTY character processing. Users should use the telnet connection for file transfers. See [Known Limitations](#known-limitations) below.
+
+### Why SSH?
+
+- **Encrypted connections**: All traffic between client and firewall is encrypted
+- **Legacy client support**: Many old BBS terminal programs support SSH with older ciphers
+- **Drop-in replacement**: Users can connect via SSH without changes to your backend BBS
+- **Best for browsing**: Ideal for reading messages, viewing content, and interactive BBS use
+
+### Setup
+
+1. **Generate an SSH host key:**
+
+```bash
+ssh-keygen -t rsa -b 4096 -f ssh_host_key -N "" -m PEM
+```
+
+This creates a private key file (`ssh_host_key`) in PEM format that the SSH server will use.
+
+**Note:** The `-m PEM` flag is important - it generates the key in the traditional PEM format which is compatible with the ssh2 library. If you already have a key in OpenSSH format, you can convert it:
+
+```bash
+ssh-keygen -p -m PEM -f ssh_host_key -N ""
+```
+
+2. **Enable SSH in your `.env` file:**
+
+```bash
+SSH_ENABLED=true
+SSH_LISTEN_PORT=2222
+SSH_HOST_KEY=./ssh_host_key
+```
+
+3. **Start the firewall:**
+
+```bash
+npm start
+```
+
+The SSH server will start alongside the telnet proxy.
+
+### Connect via SSH
+
+Users can connect with any SSH client:
+
+```bash
+ssh -p 2222 anyusername@yourdomain.com
+```
+
+When prompted for a password, they can enter **anything** - all credentials are accepted.
+
+### Legacy Cipher Support
+
+Many older BBS terminal programs (like SyncTERM) only support older SSH ciphers. bbsfw includes these by default, but you can customize the cipher list:
+
+**Default ciphers:**
+- `aes128-gcm@openssh.com`
+- `aes256-gcm@openssh.com`
+- `aes128-ctr`, `aes192-ctr`, `aes256-ctr`
+- `aes128-cbc`, `aes192-cbc`, `aes256-cbc`
+- `3des-cbc` (for very old clients)
+
+**Custom cipher configuration:**
+
+```bash
+# In .env file
+SSH_CIPHERS=aes128-ctr,aes256-ctr,aes128-cbc,3des-cbc
+```
+
+Separate ciphers with commas. Order matters - the first matching cipher will be used.
+
+### How It Works
+
+1. Client connects to SSH server on `SSH_LISTEN_PORT`
+2. SSH handshake occurs (encryption negotiation)
+3. Client authenticates with any username/password (all accepted)
+4. Shell session is established
+5. SSH server opens a telnet connection to `BACKEND_HOST:BACKEND_PORT`
+6. All data is proxied bidirectionally:
+   - Client ↔ SSH (encrypted) ↔ bbsfw ↔ Telnet (unencrypted) ↔ Backend BBS
+7. All firewall rules apply (country blocking, rate limiting, IP filtering)
+
+### Security Notes
+
+- **No authentication**: The SSH server accepts any credentials. Security comes from IP filtering, country blocking, and rate limiting.
+- **Backend connection is unencrypted**: The connection from bbsfw to your backend BBS is still telnet (unencrypted). Only the client-to-firewall connection is encrypted.
+- **Host key verification**: Clients will see a host key fingerprint on first connection. They should verify this matches your server.
+
+### Known Limitations
+
+**Binary File Transfers (Zmodem, Ymodem, etc.)**
+
+Due to SSH PTY (pseudo-terminal) character processing, binary file transfer protocols like Zmodem may not work reliably over SSH connections. The SSH protocol performs terminal emulation which can modify or corrupt binary data streams, resulting in CRC errors and failed transfers.
+
+**Workaround:** Use the telnet connection for file transfers. This is a known limitation of SSH PTY mode and affects most SSH-based BBS proxy implementations.
+
+**Recommended workflow:**
+1. Connect via SSH for regular BBS browsing (encrypted, more secure)
+2. When you need to download/upload files, switch to telnet connection
+3. Return to SSH after the file transfer is complete
+
+This limitation is inherent to how SSH handles terminal sessions and cannot be fully resolved without using alternative file transfer methods (such as SFTP, which would require a different server implementation).
+
+### Testing SSH
+
+Test your SSH server:
+
+```bash
+# Connect with verbose output
+ssh -v -p 2222 test@localhost
+
+# Test with a specific cipher
+ssh -c aes128-cbc -p 2222 test@localhost
+```
 
 ## Country Blocking
 
@@ -278,6 +404,7 @@ The firewall consists of several modules:
 
 - **server.js**: Main server logic and connection management
 - **proxy.js**: Handles bidirectional TCP proxy connections
+- **ssh.js**: SSH server implementation with credential bypass
 - **config.js**: Configuration management and validation
 - **logger.js**: Logging utility with configurable levels
 - **geoip.js**: GeoIP database integration for country lookups
@@ -286,21 +413,24 @@ The firewall consists of several modules:
 
 ## How It Works
 
-1. The firewall listens on the configured `LISTEN_PORT`
-2. When a client connects, the IP is checked in this order:
+1. The firewall listens on `LISTEN_PORT` for telnet and optionally on `SSH_LISTEN_PORT` for SSH
+2. When a client connects (via telnet or SSH), the IP is checked in this order:
    - **Whitelist** (if matched, skip all other checks)
    - IP blocklist (permanent block)
    - Rate limiting (temporary block for floods)
    - GeoIP country check (if enabled)
 3. If any check fails, the connection is rejected immediately
-4. If all checks pass, a connection is established to `BACKEND_HOST:BACKEND_PORT`
-5. Data is forwarded bidirectionally between client and backend
-6. All connections are logged with traffic statistics and filtering decisions
-7. Connections are tracked and limited by `MAX_CONNECTIONS`
+4. For SSH connections, any username/password is accepted (no authentication)
+5. If all checks pass, a connection is established to `BACKEND_HOST:BACKEND_PORT`
+6. Data is forwarded bidirectionally between client and backend
+7. All connections are logged with traffic statistics and filtering decisions
+8. Connections are tracked and limited by `MAX_CONNECTIONS`
 
 ## Features
 
 ✅ **TCP Proxy**: Forwards telnet connections to backend BBS server  
+✅ **SSH Server**: Optional encrypted SSH access (accepts any credentials)  
+✅ **Legacy Cipher Support**: Configurable SSH ciphers for old BBS clients  
 ✅ **IP Whitelist**: Always allow specific IPs/ranges (bypass all firewall rules)  
 ✅ **Country Blocking**: Block connections from specific countries using local GeoIP database  
 ✅ **IP Blocklist**: Block specific IP addresses/ranges from a file (supports CIDR)  
@@ -308,7 +438,7 @@ The firewall consists of several modules:
 ✅ **Connection Management**: Track and limit simultaneous connections  
 ✅ **Logging**: Detailed logging with configurable levels and filtering decisions  
 ✅ **Performance**: Local database lookups, no external API calls  
-✅ **Minimal Dependencies**: Only Node.js built-ins (plus maxmind for GeoIP)  
+✅ **Minimal Dependencies**: Only Node.js built-ins plus ssh2 and maxmind  
 
 ## Future Enhancements
 
@@ -328,6 +458,7 @@ Planned features for future releases:
 bbsfw/
 ├── server.js              # Main entry point
 ├── proxy.js               # Proxy connection handler
+├── ssh.js                 # SSH server module
 ├── config.js              # Configuration management
 ├── logger.js              # Logging utility
 ├── geoip.js               # GeoIP lookup module

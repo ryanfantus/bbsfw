@@ -40,6 +40,28 @@ const config = {
   
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
+  
+  // SSH Server settings
+  sshEnabled: process.env.SSH_ENABLED === 'true',
+  sshListenPort: parseInt(process.env.SSH_LISTEN_PORT || '2222', 10),
+  sshHostKey: process.env.SSH_HOST_KEY || './ssh_host_key',
+  
+  // SSH Ciphers (comma-separated list)
+  // Default includes modern and legacy ciphers for compatibility
+  // For very old clients, you may need to add: 3des-cbc,aes128-cbc,aes256-cbc
+  sshCiphers: process.env.SSH_CIPHERS
+    ? process.env.SSH_CIPHERS.split(',').map(c => c.trim()).filter(c => c)
+    : [
+        'aes128-gcm@openssh.com',
+        'aes256-gcm@openssh.com',
+        'aes128-ctr',
+        'aes192-ctr',
+        'aes256-ctr',
+        'aes128-cbc',
+        'aes192-cbc',
+        'aes256-cbc',
+        '3des-cbc',
+      ],
 };
 
 /**
@@ -66,6 +88,16 @@ function validateConfig() {
   
   if (config.rateLimitWindowMs < 1000) {
     errors.push('RATE_LIMIT_WINDOW_MS must be at least 1000 (1 second)');
+  }
+  
+  if (config.sshEnabled) {
+    if (config.sshListenPort < 1 || config.sshListenPort > 65535) {
+      errors.push('SSH_LISTEN_PORT must be between 1 and 65535');
+    }
+    
+    if (!config.sshHostKey) {
+      errors.push('SSH_HOST_KEY is required when SSH is enabled');
+    }
   }
   
   if (errors.length > 0) {
