@@ -430,6 +430,7 @@ The firewall consists of several modules:
 
 ✅ **TCP Proxy**: Forwards telnet connections to backend BBS server  
 ✅ **SSH Server**: Optional encrypted SSH access (accepts any credentials)  
+   - ⚠️ Note: Telnet recommended for binary file transfers; SSH best for browsing  
 ✅ **Legacy Cipher Support**: Configurable SSH ciphers for old BBS clients  
 ✅ **IP Whitelist**: Always allow specific IPs/ranges (bypass all firewall rules)  
 ✅ **Country Blocking**: Block connections from specific countries using local GeoIP database  
