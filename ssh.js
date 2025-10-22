@@ -36,7 +36,15 @@ function createSSHServer(config) {
     },
     (client) => {
       // Get client IP from the socket
-      const clientIP = client._sock?.remoteAddress || 'unknown';
+      const clientIP = client._sock?.remoteAddress;
+      
+      // Handle edge case where remoteAddress is undefined
+      if (!clientIP) {
+        logger.warn('SSH connection rejected: unable to determine client IP address');
+        client.end();
+        return;
+      }
+      
       logger.info(`SSH client connected from ${clientIP}`);
 
       // Check if IP should be blocked before authentication

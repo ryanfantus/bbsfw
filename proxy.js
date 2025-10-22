@@ -14,7 +14,7 @@ class ProxyConnection {
     this.backendHost = backendHost;
     this.backendPort = backendPort;
     this.backendSocket = null;
-    this.clientAddress = `${clientSocket.remoteAddress}:${clientSocket.remotePort}`;
+    this.clientAddress = `${clientSocket.remoteAddress || 'unknown'}:${clientSocket.remotePort || 'unknown'}`;
     this.connectionId = this.generateConnectionId();
     this.bytesFromClient = 0;
     this.bytesFromBackend = 0;
@@ -27,6 +27,14 @@ class ProxyConnection {
 
   connect() {
     const clientIp = this.clientSocket.remoteAddress;
+    
+    // Handle edge case where remoteAddress is undefined
+    if (!clientIp) {
+      logger.warn(`[${this.connectionId}] Connection rejected: unable to determine client IP address`);
+      this.clientSocket.end();
+      return;
+    }
+    
     logger.info(`[${this.connectionId}] New connection from ${this.clientAddress}`);
     
     // Check IP filter (whitelist, blocklist, and rate limiting)

@@ -154,6 +154,11 @@ class IPFilter {
   }
 
   isIPWhitelisted(ipAddress) {
+    // Handle null/undefined IP addresses
+    if (!ipAddress || typeof ipAddress !== 'string') {
+      return false;
+    }
+    
     // Clean IPv6-mapped IPv4 addresses
     const cleanIp = ipAddress.replace(/^::ffff:/i, '');
     
@@ -178,6 +183,11 @@ class IPFilter {
   }
 
   isIPInBlocklist(ipAddress) {
+    // Handle null/undefined IP addresses
+    if (!ipAddress || typeof ipAddress !== 'string') {
+      return false;
+    }
+    
     // Clean IPv6-mapped IPv4 addresses
     const cleanIp = ipAddress.replace(/^::ffff:/i, '');
     
@@ -204,6 +214,11 @@ class IPFilter {
   recordConnectionAttempt(ipAddress) {
     if (!this.config.rateLimitEnabled) {
       return;
+    }
+    
+    // Handle null/undefined IP addresses
+    if (!ipAddress || typeof ipAddress !== 'string') {
+      return false;
     }
 
     const now = Date.now();
@@ -249,6 +264,11 @@ class IPFilter {
   }
 
   isIPBlocked(ipAddress) {
+    // Handle null/undefined IP addresses
+    if (!ipAddress || typeof ipAddress !== 'string') {
+      return { blocked: false };
+    }
+    
     const cleanIp = ipAddress.replace(/^::ffff:/i, '');
     
     // Check if temporarily blocked
@@ -271,6 +291,12 @@ class IPFilter {
   }
 
   shouldAllowConnection(ipAddress) {
+    // Handle null/undefined IP addresses - block them by default
+    if (!ipAddress || typeof ipAddress !== 'string') {
+      logger.warn('Connection attempt with invalid/undefined IP address');
+      return { allowed: false, reason: 'Invalid IP address' };
+    }
+    
     // Check if IP is whitelisted - if so, bypass all other checks
     if (this.isIPWhitelisted(ipAddress)) {
       logger.debug(`Connection from whitelisted IP: ${ipAddress}`);
