@@ -8,6 +8,7 @@ const net = require('net');
 const fs = require('fs');
 const logger = require('./logger');
 const { getIPFilter } = require('./ipfilter');
+const { detectFromSSHEnvironment, detectFromTerminalType, getBackendPortForEncoding } = require('./encoding-detector');
 
 /**
  * Creates and starts the SSH server
@@ -37,6 +38,11 @@ function createSSHServer(config) {
     (client) => {
       // Get client IP from the socket
       const clientIP = client._sock?.remoteAddress;
+      
+      // Setup error handler early to catch any connection issues
+      client.on('error', (err) => {
+        logger.debug(`SSH client error: ${err.message}`);
+      });
       
       // Handle edge case where remoteAddress is undefined
       if (!clientIP) {
@@ -83,10 +89,47 @@ function createSSHServer(config) {
           }
           
           const session = accept();
+          
+          // Variables to track encoding detection
+          let detectedEncoding = 'cp437'; // Default to CP437
+          let sshEnv = {};
+          let termType = null;
+
+          // Handle environment variables (for encoding detection)
+          session.on('env', (accept, reject, info) => {
+            logger.debug(`SSH env received from ${clientIP}: ${info.key}=${info.value}`);
+            sshEnv[info.key] = info.value;
+            
+            // Try to detect encoding from environment
+            if (config.encodingDetection) {
+              const envDetected = detectFromSSHEnvironment(sshEnv);
+              if (envDetected === 'utf8') {
+                detectedEncoding = 'utf8';
+                logger.info(`Detected UTF-8 encoding from SSH environment for ${clientIP}`);
+              }
+            }
+            
+            accept && accept();
+          });
 
           // Handle PTY request first (must come before shell)
           session.on('pty', (accept, reject, info) => {
             logger.debug(`PTY requested for ${clientIP}, accept type: ${typeof accept}, term: ${info.term}`);
+            
+            // Capture terminal type
+            if (info && info.term) {
+              termType = info.term;
+              
+              // Try to detect encoding from terminal type if not already detected from env
+              if (config.encodingDetection && detectedEncoding === 'cp437') {
+                const termDetected = detectFromTerminalType(termType);
+                if (termDetected === 'utf8') {
+                  detectedEncoding = 'utf8';
+                  logger.info(`Detected UTF-8 encoding from terminal type '${termType}' for ${clientIP}`);
+                }
+              }
+            }
+            
             if (typeof accept === 'function') {
               // Accept the PTY in raw mode - disable all terminal processing
               // This is critical for binary protocols like Zmodem
@@ -119,6 +162,15 @@ function createSSHServer(config) {
             // ssh2 streams are already binary, don't mess with them
             stream.allowHalfOpen = true;
 
+            // Determine backend port based on detected encoding
+            const actualBackendPort = config.encodingDetection 
+              ? getBackendPortForEncoding(detectedEncoding, config)
+              : config.backendPort;
+            
+            if (config.encodingDetection) {
+              logger.info(`SSH client ${clientIP} using backend port ${actualBackendPort} for encoding: ${detectedEncoding}`);
+            }
+            
             // Connect to backend telnet server
             const backendSocket = new net.Socket();
             
@@ -126,8 +178,8 @@ function createSSHServer(config) {
             backendSocket.setNoDelay(true);    // Disable Nagle's algorithm
             backendSocket.setKeepAlive(true, 30000);  // Enable TCP keepalive
             
-            backendSocket.connect(config.backendPort, config.backendHost, () => {
-              logger.info(`SSH client ${clientIP} connected to backend ${config.backendHost}:${config.backendPort}`);
+            backendSocket.connect(actualBackendPort, config.backendHost, () => {
+              logger.info(`SSH client ${clientIP} connected to backend ${config.backendHost}:${actualBackendPort}`);
               
               // Ensure backend socket is optimized
               backendSocket.setNoDelay(true);
@@ -218,10 +270,6 @@ function createSSHServer(config) {
             reject();
           });
         });
-      });
-
-      client.on('error', (err) => {
-        logger.error(`SSH client error:`, err.message);
       });
 
       client.on('close', () => {

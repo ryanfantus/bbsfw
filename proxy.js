@@ -7,6 +7,7 @@ const logger = require('./logger');
 const { config } = require('./config');
 const { getGeoIP } = require('./geoip');
 const { getIPFilter } = require('./ipfilter');
+const { detectFromTelnetNegotiation, getBackendPortForEncoding } = require('./encoding-detector');
 
 class ProxyConnection {
   constructor(clientSocket, backendHost, backendPort) {
@@ -19,6 +20,8 @@ class ProxyConnection {
     this.bytesFromClient = 0;
     this.bytesFromBackend = 0;
     this.isCleanedUp = false;
+    this.detectedEncoding = 'cp437'; // Default encoding
+    this.terminalType = null;
   }
 
   generateConnectionId() {
@@ -31,6 +34,10 @@ class ProxyConnection {
     // Handle edge case where remoteAddress is undefined
     if (!clientIp) {
       logger.warn(`[${this.connectionId}] Connection rejected: unable to determine client IP address`);
+      // Add error handler before closing to prevent unhandled errors
+      this.clientSocket.on('error', (err) => {
+        logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
+      });
       this.clientSocket.end();
       return;
     }
@@ -45,6 +52,10 @@ class ProxyConnection {
       const filterResult = ipFilter.shouldAllowConnection(clientIp);
       if (!filterResult.allowed) {
         logger.warn(`[${this.connectionId}] Connection blocked by IP filter: ${filterResult.reason}`);
+        // Add error handler before closing to prevent unhandled errors
+        this.clientSocket.on('error', (err) => {
+          logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
+        });
         this.clientSocket.end();
         return;
       }
@@ -54,6 +65,10 @@ class ProxyConnection {
     // Check country blocking (skip for whitelisted IPs)
     if (!isWhitelisted && this.shouldBlockConnection(clientIp)) {
       logger.warn(`[${this.connectionId}] Connection blocked by country filter`);
+      // Add error handler before closing to prevent unhandled errors
+      this.clientSocket.on('error', (err) => {
+        logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
+      });
       this.clientSocket.end();
       return;
     }
@@ -62,10 +77,19 @@ class ProxyConnection {
     this.clientSocket.setNoDelay(true);
     this.clientSocket.setKeepAlive(true);
     
+    // Determine backend port based on encoding (if detection is enabled)
+    const actualBackendPort = config.encodingDetection 
+      ? getBackendPortForEncoding(this.detectedEncoding, config)
+      : this.backendPort;
+    
+    if (config.encodingDetection) {
+      logger.info(`[${this.connectionId}] Using backend port ${actualBackendPort} for encoding: ${this.detectedEncoding}`);
+    }
+    
     // Create connection to backend server
     this.backendSocket = net.createConnection({
       host: this.backendHost,
-      port: this.backendPort,
+      port: actualBackendPort,
     }, () => {
       const backendAddr = `${this.backendSocket.remoteAddress}:${this.backendSocket.remotePort}`;
       const localAddr = `${this.backendSocket.localAddress}:${this.backendSocket.localPort}`;

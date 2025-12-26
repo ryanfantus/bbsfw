@@ -13,6 +13,11 @@ const config = {
   backendHost: process.env.BACKEND_HOST || '127.0.0.1',
   backendPort: parseInt(process.env.BACKEND_PORT || '2323', 10),
   
+  // Encoding-based backend routing
+  encodingDetection: process.env.ENCODING_DETECTION === 'true',
+  backendPortCP437: parseInt(process.env.BACKEND_PORT_CP437 || '2323', 10),
+  backendPortUTF8: parseInt(process.env.BACKEND_PORT_UTF8 || '2423', 10),
+  
   // Server settings
   maxConnections: parseInt(process.env.MAX_CONNECTIONS || '100', 10),
   connectionTimeout: parseInt(process.env.CONNECTION_TIMEOUT || '300000', 10), // 5 minutes default

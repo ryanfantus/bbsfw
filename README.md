@@ -7,6 +7,7 @@ A lightweight TCP proxy firewall for BBS telnet connections, built with Node.js.
 - **TCP Proxy**: Forwards telnet connections to an internal BBS server
 - **SSH Server**: Built-in SSH server that proxies to telnet backend (accepts any credentials)
   - Note: Use telnet for binary file transfers (Zmodem, etc.); SSH is best for browsing
+- **Encoding Detection**: Automatically detects UTF-8 vs CP437 and routes to appropriate backend
 - **Connection Management**: Tracks active connections and enforces limits
 - **Logging**: Detailed connection and traffic logging
 - **Configurable**: Easy configuration via environment variables
@@ -47,6 +48,9 @@ Configure the firewall by setting environment variables or editing `.env`:
 | `LISTEN_PORT` | Port to listen on for incoming telnet connections | `2323` |
 | `BACKEND_HOST` | Backend BBS server hostname/IP (use 127.0.0.1 for IPv4) | `127.0.0.1` |
 | `BACKEND_PORT` | Backend BBS server port | `23` |
+| `ENCODING_DETECTION` | Enable automatic UTF-8/CP437 encoding detection and routing | `false` |
+| `BACKEND_PORT_CP437` | Backend port for CP437 (DOS/ANSI) clients | `2323` |
+| `BACKEND_PORT_UTF8` | Backend port for UTF-8 (Unicode) clients | `2423` |
 | `MAX_CONNECTIONS` | Maximum simultaneous connections | `100` |
 | `CONNECTION_TIMEOUT` | Connection timeout in milliseconds (0 to disable) | `300000` (5 min) |
 | `SSH_ENABLED` | Enable SSH server | `false` |
@@ -86,6 +90,76 @@ telnet localhost 2323
 ```
 
 The connection will be forwarded to your configured backend server.
+
+## Character Encoding Detection
+
+bbsfw can automatically detect whether a client supports UTF-8 (Unicode) or CP437 (DOS/ANSI) and route them to different backend ports. This allows you to run separate BBS instances optimized for each encoding.
+
+### How It Works
+
+- **Default**: All connections go to CP437 backend (port 2323 by default)
+- **SSH Connections**: Detects UTF-8 from environment variables (`LANG`, `LC_ALL`) and terminal type
+- **Telnet Connections**: Uses default CP437 (terminal type detection is unreliable for telnet)
+
+### Setup
+
+1. **Enable encoding detection in your `.env` file:**
+
+```bash
+ENCODING_DETECTION=true
+BACKEND_PORT_CP437=2323
+BACKEND_PORT_UTF8=2423
+```
+
+2. **Configure your backend BBS instances:**
+   - Run one BBS instance on port 2323 configured for CP437/DOS
+   - Run another instance on port 2423 configured for UTF-8/Unicode
+
+3. **Restart the firewall:**
+
+```bash
+npm start
+```
+
+### Detection Logic
+
+For **SSH connections**, encoding is detected from:
+1. **Environment variables** (highest priority):
+   - `LANG` containing "UTF-8" or "UTF8" → routes to UTF-8 backend
+   - `LC_ALL` containing "UTF-8" or "UTF8" → routes to UTF-8 backend
+   - `LC_CTYPE` containing "UTF-8" or "UTF8" → routes to UTF-8 backend
+   
+2. **Terminal type** (fallback):
+   - Modern terminals (`xterm`, `screen`, `linux`, etc.) → UTF-8
+   - DOS/ANSI terminals (`ansi`, `pcansi`, `scoansi`) → CP437
+
+3. **Default**: If no indicators found → CP437
+
+For **Telnet connections**:
+- Always uses CP437 backend (default)
+- Terminal type detection is unreliable over telnet
+
+### Example
+
+```bash
+# User connects via SSH with LANG=en_US.UTF-8
+# bbsfw detects UTF-8 and routes to port 2423
+
+# User connects via SSH with no LANG set
+# bbsfw defaults to CP437 and routes to port 2323
+
+# User connects via telnet
+# bbsfw uses CP437 and routes to port 2323
+```
+
+### Logging
+
+When encoding detection is enabled, you'll see log messages like:
+
+```
+[INFO] Detected UTF-8 encoding from SSH environment for ::ffff:192.168.1.100
+[INFO] SSH client ::ffff:192.168.1.100 using backend port 2423 for encoding: utf8
+```
 
 ## SSH Server
 
@@ -409,6 +483,7 @@ The firewall consists of several modules:
 - **logger.js**: Logging utility with configurable levels
 - **geoip.js**: GeoIP database integration for country lookups
 - **ipfilter.js**: IP blocklist and rate limiting module
+- **encoding-detector.js**: UTF-8/CP437 encoding detection for smart routing
 - **download-geoip.js**: Helper script to download GeoLite2 database
 
 ## How It Works
@@ -431,6 +506,7 @@ The firewall consists of several modules:
 ✅ **TCP Proxy**: Forwards telnet connections to backend BBS server  
 ✅ **SSH Server**: Optional encrypted SSH access (accepts any credentials)  
    - ⚠️ Note: Telnet recommended for binary file transfers; SSH best for browsing  
+✅ **Encoding Detection**: Automatic UTF-8/CP437 detection routes clients to appropriate backends  
 ✅ **Legacy Cipher Support**: Configurable SSH ciphers for old BBS clients  
 ✅ **IP Whitelist**: Always allow specific IPs/ranges (bypass all firewall rules)  
 ✅ **Country Blocking**: Block connections from specific countries using local GeoIP database  
@@ -464,6 +540,7 @@ bbsfw/
 ├── logger.js              # Logging utility
 ├── geoip.js               # GeoIP lookup module
 ├── ipfilter.js            # IP blocklist and rate limiting
+├── encoding-detector.js   # UTF-8/CP437 encoding detection
 ├── download-geoip.js      # Database download helper
 ├── package.json           # Project metadata
 ├── .env.example           # Example configuration
