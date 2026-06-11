@@ -9,6 +9,11 @@ const { getGeoIP } = require('./geoip');
 const { getIPFilter } = require('./ipfilter');
 const { detectFromTelnetNegotiation, getBackendPortForEncoding } = require('./encoding-detector');
 
+// When the last proxied session ended. Used for the post-session grace period:
+// a single-line backend (real C64 hardware) needs a few seconds to recycle
+// after a caller disconnects before it can answer the next one.
+let lastSessionEndMs = 0;
+
 class ProxyConnection {
   constructor(clientSocket, backendHost, backendPort) {
     this.clientSocket = clientSocket;
@@ -22,6 +27,11 @@ class ProxyConnection {
     this.isCleanedUp = false;
     this.detectedEncoding = 'cp437'; // Default encoding
     this.terminalType = null;
+    this.backendConnected = false;
+    this.graceTimer = null;
+    this.graceBuffer = null;
+    this.graceDataHandler = null;
+    this.clientHandlersAttached = false;
   }
 
   generateConnectionId() {
@@ -38,7 +48,9 @@ class ProxyConnection {
       this.clientSocket.on('error', (err) => {
         logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
       });
-      this.clientSocket.end();
+      // destroy() (not end()): rejected sockets have no data handler, so if the
+      // client already sent bytes, end() never completes and 'close' never fires
+      this.clientSocket.destroy();
       return;
     }
     
@@ -56,7 +68,7 @@ class ProxyConnection {
         this.clientSocket.on('error', (err) => {
           logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
         });
-        this.clientSocket.end();
+        this.clientSocket.destroy();
         return;
       }
       isWhitelisted = filterResult.whitelisted || false;
@@ -69,14 +81,59 @@ class ProxyConnection {
       this.clientSocket.on('error', (err) => {
         logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
       });
-      this.clientSocket.end();
+      this.clientSocket.destroy();
       return;
     }
     
     // Disable Nagle's algorithm for better real-time performance
     this.clientSocket.setNoDelay(true);
     this.clientSocket.setKeepAlive(true);
-    
+
+    // Post-session grace period: hold the caller until the backend has had
+    // time to recycle after the previous session
+    const graceRemaining = config.postSessionGraceMs > 0
+      ? config.postSessionGraceMs - (Date.now() - lastSessionEndMs)
+      : 0;
+
+    if (graceRemaining > 0) {
+      this.holdForGracePeriod(graceRemaining);
+      return;
+    }
+
+    this.connectToBackend();
+  }
+
+  holdForGracePeriod(waitMs) {
+    logger.info(`[${this.connectionId}] Holding connection for ${waitMs}ms (post-session grace, backend recycling)`);
+    this.clientHandlersAttached = true;
+
+    // Buffer client bytes (e.g. telnet IAC negotiation) sent while held, so
+    // they reach the backend in order once connected
+    this.graceBuffer = [];
+    this.graceDataHandler = (data) => {
+      this.graceBuffer.push(data);
+    };
+    this.clientSocket.on('data', this.graceDataHandler);
+
+    this.clientSocket.on('error', (err) => {
+      logger.error(`[${this.connectionId}] Client socket error: ${err.message}`);
+      this.cleanup('client-error');
+    });
+    this.clientSocket.on('close', (hadError) => {
+      logger.debug(`[${this.connectionId}] Client socket closed during grace hold (hadError: ${hadError})`);
+      this.cleanup('client-close');
+    });
+
+    this.graceTimer = setTimeout(() => {
+      this.graceTimer = null;
+      if (this.isCleanedUp) {
+        return;
+      }
+      this.connectToBackend();
+    }, waitMs);
+  }
+
+  connectToBackend() {
     // Determine backend port based on encoding (if detection is enabled)
     const actualBackendPort = config.encodingDetection 
       ? getBackendPortForEncoding(this.detectedEncoding, config)
@@ -94,10 +151,25 @@ class ProxyConnection {
       const backendAddr = `${this.backendSocket.remoteAddress}:${this.backendSocket.remotePort}`;
       const localAddr = `${this.backendSocket.localAddress}:${this.backendSocket.localPort}`;
       logger.info(`[${this.connectionId}] Connected to backend ${backendAddr} (from ${localAddr})`);
+      this.backendConnected = true;
       // Disable Nagle's algorithm on backend socket too
       this.backendSocket.setNoDelay(true);
       this.backendSocket.setKeepAlive(true);
     });
+
+    // Forward bytes the client sent while held for the grace period (Node
+    // queues writes made before the backend connection completes)
+    if (this.graceDataHandler) {
+      this.clientSocket.removeListener('data', this.graceDataHandler);
+      this.graceDataHandler = null;
+    }
+    if (this.graceBuffer) {
+      for (const chunk of this.graceBuffer) {
+        this.bytesFromClient += chunk.length;
+        this.backendSocket.write(chunk);
+      }
+      this.graceBuffer = null;
+    }
 
     // Setup error handlers BEFORE other handlers to catch connection errors
     this.setupErrorHandlers();
@@ -181,10 +253,13 @@ class ProxyConnection {
   }
 
   setupErrorHandlers() {
-    this.clientSocket.on('error', (err) => {
-      logger.error(`[${this.connectionId}] Client socket error: ${err.message}`);
-      this.cleanup('client-error');
-    });
+    // Held connections already have client error/close handlers attached
+    if (!this.clientHandlersAttached) {
+      this.clientSocket.on('error', (err) => {
+        logger.error(`[${this.connectionId}] Client socket error: ${err.message}`);
+        this.cleanup('client-error');
+      });
+    }
 
     this.backendSocket.on('error', (err) => {
       logger.error(`[${this.connectionId}] Backend socket error: ${err.message}`);
@@ -193,10 +268,12 @@ class ProxyConnection {
   }
 
   setupCloseHandlers() {
-    this.clientSocket.on('close', (hadError) => {
-      logger.debug(`[${this.connectionId}] Client socket closed (hadError: ${hadError})`);
-      this.cleanup('client-close');
-    });
+    if (!this.clientHandlersAttached) {
+      this.clientSocket.on('close', (hadError) => {
+        logger.debug(`[${this.connectionId}] Client socket closed (hadError: ${hadError})`);
+        this.cleanup('client-close');
+      });
+    }
 
     this.backendSocket.on('close', (hadError) => {
       logger.debug(`[${this.connectionId}] Backend socket closed (hadError: ${hadError})`);
@@ -209,7 +286,17 @@ class ProxyConnection {
       return; // Prevent duplicate cleanup
     }
     this.isCleanedUp = true;
-    
+
+    if (this.graceTimer) {
+      clearTimeout(this.graceTimer);
+      this.graceTimer = null;
+    }
+
+    // Only a session that actually reached the backend arms the grace period
+    if (this.backendConnected) {
+      lastSessionEndMs = Date.now();
+    }
+
     logger.info(`[${this.connectionId}] Connection closed (reason: ${reason}). Bytes: client→backend=${this.bytesFromClient}, backend→client=${this.bytesFromBackend}`);
     
     if (this.clientSocket && !this.clientSocket.destroyed) {

@@ -53,6 +53,7 @@ Configure the firewall by setting environment variables or editing `.env`:
 | `BACKEND_PORT_UTF8` | Backend port for UTF-8 (Unicode) clients | `2423` |
 | `MAX_CONNECTIONS` | Maximum simultaneous connections | `100` |
 | `CONNECTION_TIMEOUT` | Connection timeout in milliseconds (0 to disable) | `300000` (5 min) |
+| `POST_SESSION_GRACE_MS` | Hold new callers this long after the previous session ends, so a single-line backend (e.g. a real C64 BBS) can recycle. Bytes sent while held are buffered and forwarded. (0 to disable) | `0` |
 | `SSH_ENABLED` | Enable SSH server | `false` |
 | `SSH_LISTEN_PORT` | Port to listen on for incoming SSH connections | `2222` |
 | `SSH_HOST_KEY` | Path to SSH host private key file | `./ssh_host_key` |

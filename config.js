@@ -21,6 +21,10 @@ const config = {
   // Server settings
   maxConnections: parseInt(process.env.MAX_CONNECTIONS || '100', 10),
   connectionTimeout: parseInt(process.env.CONNECTION_TIMEOUT || '300000', 10), // 5 minutes default
+
+  // Hold new callers this long after the previous session ends, so a
+  // single-line backend (e.g. a real C64 BBS) has time to recycle. 0 = off.
+  postSessionGraceMs: parseInt(process.env.POST_SESSION_GRACE_MS || '0', 10),
   
   // Country blocking (comma-separated ISO 3166-1 alpha-2 country codes)
   // Example: BLOCKED_COUNTRIES=CN,RU,KP

@@ -11,7 +11,7 @@ const LOG_LEVELS = {
   error: 3,
 };
 
-const currentLevel = LOG_LEVELS[config.logLevel] || LOG_LEVELS.info;
+const currentLevel = LOG_LEVELS[config.logLevel] ?? LOG_LEVELS.info;
 
 function log(level, message, data = null) {
   if (LOG_LEVELS[level] >= currentLevel) {
