@@ -38,10 +38,12 @@ class ProxyConnection {
       this.clientSocket.on('error', (err) => {
         logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
       });
-      this.clientSocket.end();
+      // destroy() (not end()): rejected sockets have no data handler, so if the
+      // client already sent bytes, end() never completes and 'close' never fires
+      this.clientSocket.destroy();
       return;
     }
-    
+
     logger.info(`[${this.connectionId}] New connection from ${this.clientAddress}`);
     
     // Check IP filter (whitelist, blocklist, and rate limiting)
@@ -56,7 +58,7 @@ class ProxyConnection {
         this.clientSocket.on('error', (err) => {
           logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
         });
-        this.clientSocket.end();
+        this.clientSocket.destroy();
         return;
       }
       isWhitelisted = filterResult.whitelisted || false;
@@ -69,10 +71,10 @@ class ProxyConnection {
       this.clientSocket.on('error', (err) => {
         logger.debug(`[${this.connectionId}] Client socket error during rejection: ${err.message}`);
       });
-      this.clientSocket.end();
+      this.clientSocket.destroy();
       return;
     }
-    
+
     // Disable Nagle's algorithm for better real-time performance
     this.clientSocket.setNoDelay(true);
     this.clientSocket.setKeepAlive(true);

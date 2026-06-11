@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "test": "node --test tests/",
     "setup-geoip": "node download-geoip.js"
   },
   "dependencies": {

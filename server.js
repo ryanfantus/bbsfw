@@ -85,7 +85,8 @@ class BBSFirewall {
     // Check max connections limit
     if (this.activeConnections >= config.maxConnections) {
       logger.warn(`Connection rejected: max connections (${config.maxConnections}) reached`);
-      clientSocket.end();
+      clientSocket.on('error', () => {});
+      clientSocket.destroy();
       return;
     }
 
